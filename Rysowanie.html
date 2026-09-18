@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="pl">
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>Rysowanie</title>
+
+		<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+
+		<style>
+			* {
+				box-sizing: border-box;
+			}
+
+			body {
+				margin: 0;
+				background: #111827;
+				color: white;
+				font-family: Arial, sans-serif;
+			}
+
+			.toolbar {
+				padding: 12px;
+				background: #1f2937;
+				display: flex;
+				flex-wrap: wrap;
+				gap: 10px;
+				align-items: center;
+				box-shadow: 0 3px 15px #0005;
+			}
+
+			.group {
+				display: flex;
+				align-items: center;
+				gap: 7px;
+			}
+
+			input,
+			button {
+				border: 0;
+				border-radius: 8px;
+				padding: 9px 12px;
+				font-size: 15px;
+			}
+
+			input {
+				width: 130px;
+				outline: none;
+			}
+
+			#myId {
+				width: 90px;
+				background: #111827;
+				color: #4ade80;
+				font-weight: bold;
+				text-align: center;
+				letter-spacing: 2px;
+			}
+
+			#remoteId {
+				width: 140px;
+			}
+
+			#color {
+				width: 45px;
+				height: 40px;
+				padding: 3px;
+				cursor: pointer;
+			}
+
+			#size {
+				width: 100px;
+				padding: 0;
+				cursor: pointer;
+			}
+
+			#sizeValue {
+				min-width: 35px;
+				color: #d1d5db;
+			}
+
+			button {
+				background: #4f46e5;
+				color: white;
+				cursor: pointer;
+				transition: .2s;
+			}
+
+			button:hover {
+				background: #6366f1;
+			}
+
+			button:disabled {
+				background: #4b5563;
+				cursor: not-allowed;
+			}
+
+			#clear {
+				background: #dc2626;
+			}
+
+			#clear:hover {
+				background: #ef4444;
+			}
+
+			#status {
+				padding: 8px 12px;
+				border-radius: 20px;
+				background: #374151;
+				color: #facc15;
+				font-size: 14px;
+			}
+
+			.connected {
+				color: #4ade80 !important;
+			}
+
+			.error {
+				color: #f87171 !important;
+			}
+
+			#canvas {
+				display: block;
+				width: calc(100% - 30px);
+				max-width: 1400px;
+				height: 650px;
+				margin: 15px auto;
+				background: white;
+				border-radius: 10px;
+				cursor: not-allowed;
+				touch-action: none;
+				box-shadow: 0 5px 25px #0006;
+			}
+
+			#canvas.can-draw {
+				cursor: crosshair;
+			}
+
+			@media (max-width: 600px) {
+				.toolbar {
+					padding: 10px;
+				}
+
+				#canvas {
+					width: calc(100% - 10px);
+					height: 70vh;
+					margin: 5px;
+				}
+			}
+		</style>
+	</head>
+
+	<body>
+		<div class="toolbar">
+			<div class="group">
+				<span>ID:</span>
+				<input id="myId" readonly>
+			</div>
+
+			<div class="group">
+				<input id="remoteId" maxlength="5" placeholder="ID znajomego" autocomplete="off">
+				<button id="connect">Połącz</button>
+			</div>
+
+			<div class="group">
+				<span>Kolor:</span>
+				<input id="color" type="color" value="#000000">
+			</div>
+
+			<div class="group">
+				<span>Grubość:</span>
+				<input id="size" type="range" min="1" max="40" value="4">
+				<span id="sizeValue">4 px</span>
+			</div>
+
+			<button id="clear">Wyczyść</button>
+			<span id="status">Łączenie...</span>
+		</div>
+
+		<canvas id="canvas"></canvas>
+
+		<script>
+			const canvas = document.getElementById("canvas");
+			const ctx = canvas.getContext("2d");
+
+			const myId = document.getElementById("myId");
+			const remoteId = document.getElementById("remoteId");
+			const connectButton = document.getElementById("connect");
+			const clearButton = document.getElementById("clear");
+			const colorInput = document.getElementById("color");
+			const sizeInput = document.getElementById("size");
+			const sizeValue = document.getElementById("sizeValue");
+			const status = document.getElementById("status");
+
+			let brushColor = "#000000";
+			let brushSize = 4;
+			let connection = null;
+			let drawing = false;
+			let lastX = 0;
+			let lastY = 0;
+
+			function setupCanvas() {
+				canvas.width = canvas.clientWidth;
+				canvas.height = canvas.clientHeight;
+				ctx.fillStyle = "#fff";
+				ctx.fillRect(0, 0, canvas.width, canvas.height);
+				ctx.lineCap = "round";
+				ctx.lineJoin = "round";
+			}
+
+			setupCanvas();
+
+			function getPosition(event) {
+				const rect = canvas.getBoundingClientRect();
+
+				return {
+					x: event.clientX - rect.left,
+					y: event.clientY - rect.top
+				};
+			}
+
+			function drawLine(x1, y1, x2, y2, color, size) {
+				ctx.beginPath();
+				ctx.moveTo(x1, y1);
+				ctx.lineTo(x2, y2);
+				ctx.strokeStyle = color;
+				ctx.lineWidth = size;
+				ctx.stroke();
+			}
+
+			function isConnected() {
+				return connection?.open;
+			}
+
+			function updateCanvas() {
+				canvas.classList.toggle("can-draw", isConnected());
+
+				if (!isConnected()) {
+					drawing = false;
+				}
+			}
+
+			colorInput.addEventListener("input", () => {
+				brushColor = colorInput.value;
+			});
+
+			sizeInput.addEventListener("input", () => {
+				brushSize = Number(sizeInput.value);
+				sizeValue.textContent = `${brushSize} px`;
+			});
+
+			canvas.addEventListener("pointerdown", event => {
+				if (!isConnected()) {
+					status.textContent = "Najpierw się połącz.";
+					status.classList.add("error");
+					return;
+				}
+
+				drawing = true;
+
+				const p = getPosition(event);
+				lastX = p.x;
+				lastY = p.y;
+
+				canvas.setPointerCapture(event.pointerId);
+			});
+
+			canvas.addEventListener("pointermove", event => {
+				if (!drawing || !isConnected()) return;
+
+				const p = getPosition(event);
+
+				drawLine(lastX, lastY, p.x, p.y, brushColor, brushSize);
+
+				send({
+					type: "draw",
+					x1: lastX,
+					y1: lastY,
+					x2: p.x,
+					y2: p.y,
+					color: brushColor,
+					size: brushSize
+				});
+
+				lastX = p.x;
+				lastY = p.y;
+			});
+
+			canvas.addEventListener("pointerup", () => drawing = false);
+			canvas.addEventListener("pointercancel", () => drawing = false);
+
+			function generateId() {
+				const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+				let id = "";
+
+				for (let i = 0; i < 5; i++) {
+					id += chars[Math.floor(Math.random() * chars.length)];
+				}
+
+				return id;
+			}
+
+			const peer = new Peer(generateId());
+
+			peer.on("open", id => {
+				myId.value = id;
+				status.textContent = "Gotowy — brak połączenia";
+				status.classList.remove("error");
+				updateCanvas();
+			});
+
+			peer.on("connection", setupConnection);
+
+			peer.on("error", error => {
+				console.error(error);
+				status.textContent = "Błąd: " + error.type;
+				status.classList.remove("connected");
+				status.classList.add("error");
+				updateCanvas();
+			});
+
+			connectButton.addEventListener("click", () => {
+				const id = remoteId.value
+					.toLowerCase()
+					.replace(/[^a-z0-9]/g, "");
+
+				remoteId.value = id;
+
+				if (id.length !== 5) {
+					alert("ID musi mieć dokładnie 5 znaków.");
+					return;
+				}
+
+				if (id === myId.value) {
+					alert("Nie możesz połączyć się sam ze sobą.");
+					return;
+				}
+
+				status.textContent = "Łączenie...";
+				status.classList.remove("error");
+
+				setupConnection(peer.connect(id));
+			});
+
+			function setupConnection(conn) {
+				if (connection && connection !== conn) {
+					connection.close();
+				}
+
+				connection = conn;
+				updateCanvas();
+
+				conn.on("open", () => {
+					status.textContent = "🟢 Połączono z " + conn.peer;
+					status.classList.remove("error");
+					status.classList.add("connected");
+					connectButton.disabled = true;
+					updateCanvas();
+					sendCanvas();
+				});
+
+				conn.on("data", data => {
+					if (!data) return;
+
+					if (data.type === "draw") {
+						drawLine(
+							data.x1,
+							data.y1,
+							data.x2,
+							data.y2,
+							data.color || "#ff0000",
+							data.size || 4
+						);
+					}
+
+					if (data.type === "clear") {
+						clearCanvas(false);
+					}
+
+					if (data.type === "canvas") {
+						loadCanvas(data.image);
+					}
+				});
+
+				conn.on("close", () => {
+					if (connection === conn) {
+						connection = null;
+					}
+
+					drawing = false;
+					status.textContent = "🔴 Rozłączono";
+					status.classList.remove("connected");
+					status.classList.add("error");
+					connectButton.disabled = false;
+					updateCanvas();
+				});
+
+				conn.on("error", error => {
+					console.error("Connection error:", error);
+					status.textContent = "Błąd połączenia";
+					status.classList.remove("connected");
+					status.classList.add("error");
+					connectButton.disabled = false;
+					updateCanvas();
+				});
+			}
+
+			function send(data) {
+				if (!isConnected()) return;
+
+				try {
+					connection.send(data);
+				} catch (error) {
+					console.error("Błąd wysyłania:", error);
+				}
+			}
+
+			clearButton.addEventListener("click", () => {
+				if (!isConnected()) {
+					alert("Najpierw połącz się z drugą osobą.");
+					return;
+				}
+
+				clearCanvas(true);
+			});
+
+			function clearCanvas(sendToPeer) {
+				ctx.fillStyle = "#fff";
+				ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+				if (sendToPeer) {
+					send({ type: "clear" });
+				}
+			}
+
+			function sendCanvas() {
+				if (!isConnected()) return;
+
+				send({
+					type: "canvas",
+					image: canvas.toDataURL("image/png")
+				});
+			}
+
+			function loadCanvas(data) {
+				const image = new Image();
+
+				image.onload = () => {
+					ctx.clearRect(0, 0, canvas.width, canvas.height);
+					ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+				};
+
+				image.src = data;
+			}
+
+			remoteId.addEventListener("input", () => {
+				remoteId.value = remoteId.value
+					.toLowerCase()
+					.replace(/[^a-z0-9]/g, "")
+					.slice(0, 5);
+			});
+
+			remoteId.addEventListener("keydown", event => {
+				if (event.key === "Enter") {
+					connectButton.click();
+				}
+			});
+
+			document.addEventListener("keydown", event => {
+				if (event.key === "Escape" && connection) {
+					connection.close();
+				}
+			});
+		</script>
+
+	</body>
+</html>
